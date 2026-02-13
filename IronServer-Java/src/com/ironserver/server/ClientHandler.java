@@ -1,43 +1,25 @@
 /*
     ==========================================
-            🔥 CLIENT HANDLER FULL GUIDE
+            🔥 CLIENT HANDLER (REFACTORED)
     ==========================================
 
-    ❓ DOUBT: Runnable kaha use hota hai?
-    👉 Jab hume multithreading karni ho.
-    👉 Jab har client ko alag worker dena ho.
-    👉 Jab background task chalana ho.
+    Ab ye class 3 main kaam karegi:
 
-    ❓ Kab use karte hain?
-    👉 Jab ek se zyada kaam same time pe chalane ho.
-    👉 Jab main thread ko block nahi karna ho.
+        1️⃣ Client se network connection handle karegi
+        2️⃣ HttpParser ko call karegi request parse karne ke liye
+        3️⃣ HttpResponse object bana ke response bhejegi
 
-    Example:
-    Server me:
-        Har client = alag thread
-        Isliye Runnable use kiya.
+    Parsing logic yaha nahi hai.
+    Response formatting bhi yaha manually nahi hai.
 
-    -----------------------------------------
-
-    ❓ Interface kya hai?
-    👉 Rule book.
-    👉 Sirf method ka naam batata hai.
-    👉 Code nahi deta.
-
-    Runnable interface ke andar:
-        void run();
-
-    Isliye jo bhi Runnable implement karega,
-    use run() method likhna padega.
-
-    -----------------------------------------
-
-    ❓ @Override kya hai?
-    👉 Safety check.
-    👉 Java ko bolta hai ki main interface ka method override kar raha hoon.
+    Clean separation follow kar rahe hain.
 */
 
 package com.ironserver.server;
+
+import com.ironserver.http.HttpParser;
+import com.ironserver.http.HttpRequest;
+import com.ironserver.http.HttpResponse;
 
 import java.io.*;
 import java.net.Socket;
@@ -45,42 +27,51 @@ import java.net.Socket;
 public class ClientHandler implements Runnable {
 
     /*
-        ❓ Yaha implements Runnable kyun likha?
+        Ye socket actual client connection represent karta hai.
 
-        👉 Taaki is class ko Thread me pass kar sake.
-        👉 Thread jab start hoga to run() call karega.
-
-        Agar Runnable implement nahi karte,
-        to Thread ko kaise pata chalega kya run karna hai?
+        Har client ke liye:
+            Ek naya ClientHandler object banega.
     */
-
     private Socket clientSocket;
 
+    /*
+        Constructor:
+        Jab object banega tab socket assign hoga.
+    */
     public ClientHandler(Socket socket) {
         this.clientSocket = socket;
     }
 
+    /*
+        @Override safety check hai.
+
+        Java verify karta hai ki
+        hum Runnable ka run() properly override kar rahe hain.
+    */
     @Override
     public void run() {
 
         /*
-            🔥 DRY RUN START
+            ==========================================
+                    🔥 DRY RUN START
+            ==========================================
 
             Step 1:
-            Thread start hua.
+                Thread start hota hai.
 
             Step 2:
-            Thread automatically run() method call karega.
+                Thread automatically run() call karta hai.
         */
 
         try {
 
             /*
-                ❓ Stream kya hoti hai?
+                ==========================================
+                        STEP 1: STREAM SETUP
+                ==========================================
 
-                👉 Data ka pipe.
-                👉 InputStream = receive data
-                👉 OutputStream = send data
+                InputStream → client se data read karne ke liye
+                OutputStream → client ko data bhejne ke liye
             */
 
             BufferedReader reader = new BufferedReader(
@@ -90,99 +81,120 @@ public class ClientHandler implements Runnable {
             OutputStream outputStream = clientSocket.getOutputStream();
 
             /*
-                ❓ readLine() kya karta hai?
+                ==========================================
+                        STEP 2: REQUEST PARSE
+                ==========================================
 
-                👉 Ek line read karta hai jab tak newline na mile.
+                HttpParser.parse() raw HTTP ko
+                structured HttpRequest object me convert karta hai.
             */
 
-            String requestLine = reader.readLine();
-
-            System.out.println("Incoming Request: " + requestLine);
+            HttpRequest request = HttpParser.parse(reader);
 
             /*
-                ❓ split(" ") kya karta hai?
-
-                👉 String ko space ke basis pe tod deta hai.
+                Agar request null hai,
+                matlab client ne kuch valid send nahi kiya.
             */
-            String[] parts = requestLine.split(" ");
-
-            String method = parts[0];
-            String path = parts[1];
-
-            System.out.println("Method: " + method);
-            System.out.println("Path: " + path);
+            if (request == null) {
+                clientSocket.close();
+                return;
+            }
 
             /*
-                ❓ Response format kyu aisa hai?
+                Debug ke liye console print kar rahe hain.
+            */
+            System.out.println("=================================");
+            System.out.println("New Request Received");
+            System.out.println("Method  : " + request.getMethod());
+            System.out.println("Path    : " + request.getPath());
+            System.out.println("Version : " + request.getVersion());
+            System.out.println("Headers : " + request.getHeaders());
+            System.out.println("Body    : " + request.getBody());
+            System.out.println("=================================");
 
-                HTTP me structure hota hai:
-                Status Line
-                Headers
-                Blank line
-                Body
+            /*
+                ==========================================
+                        STEP 3: RESPONSE OBJECT CREATE
+                ==========================================
+
+                Ab manually string nahi banayenge.
+
+                HttpResponse object banayenge.
             */
 
+            HttpResponse response = new HttpResponse(200, "OK");
+
+            /*
+                Body define kar rahe hain.
+            */
             String body = "Hello from IronServer 🚀";
 
-            String response =
-                    "HTTP/1.1 200 OK\r\n" +
-                    "Content-Type: text/plain\r\n" +
-                    "Content-Length: " + body.length() + "\r\n" +
-                    "\r\n" +
-                    body;
-
             /*
-                ❓ getBytes() kyu?
-
-                Stream bytes bhejti hai.
-                Isliye String ko bytes me convert karte hain.
+                Headers add kar rahe hain.
             */
-            outputStream.write(response.getBytes());
+            response.addHeader("Content-Type", "text/plain");
+            response.addHeader("Content-Length", String.valueOf(body.length()));
 
             /*
-                ❓ flush() kab use hota hai?
+                Body set kar rahe hain.
+            */
+            response.setBody(body);
 
-                Jab hume ensure karna ho ki data turant bheja jaye.
-                Nahi to kabhi kabhi buffer me ruk sakta hai.
+            /*
+                buildResponse() pura formatted HTTP string bana deta hai.
+            */
+            String finalResponse = response.buildResponse();
+
+            /*
+                getBytes() string ko bytes me convert karta hai.
+            */
+            outputStream.write(finalResponse.getBytes());
+
+            /*
+                flush() ensure karta hai
+                ki data turant client tak pahunch jaye.
             */
             outputStream.flush();
 
             /*
-                ❓ close() kyu important hai?
-
-                👉 Resource free karta hai.
-                👉 Connection band karta hai.
+                Connection close kar rahe hain.
             */
             clientSocket.close();
 
         } catch (Exception e) {
 
             /*
-                ❓ Exception kab aayega?
+                Exception cases:
 
-                👉 Client disconnect ho gaya
-                👉 Network issue
-                👉 Null request
+                ❌ Client disconnect
+                ❌ Parsing issue
+                ❌ IO error
             */
             e.printStackTrace();
         }
 
         /*
-            🔥 FINAL FLOW
+            ==========================================
+                    🔥 FINAL FLOW SUMMARY
+            ==========================================
 
             Client connect
                 ↓
             Thread start
                 ↓
-            run() execute
+            run()
                 ↓
-            Request read
+            Stream setup
                 ↓
-            Method & path extract
+            HttpParser.parse()
                 ↓
-            Response create
+            HttpRequest object
                 ↓
-            Send via OutputStream
+            HttpResponse object create
+                ↓
+            buildResponse()
+                ↓
+            write()
                 ↓
             flush()
                 ↓
@@ -190,28 +202,3 @@ public class ClientHandler implements Runnable {
         */
     }
 }
-
-        /*
-            🔥 FINAL FLOW SUMMARY
-
-            Thread start
-                ↓
-            run() method
-                ↓
-            InputStream read
-                ↓
-            Request line read
-                ↓
-            split into method & path
-                ↓
-            Response string create
-                ↓
-            write() to output stream
-                ↓
-            flush()
-                ↓
-            close socket
-        */
-
-
-    
